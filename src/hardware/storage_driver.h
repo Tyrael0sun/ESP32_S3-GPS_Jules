@@ -7,5 +7,6 @@ namespace hardware {
 bool initStorage();
 bool ensureGpxDir();
 File openGpxLog(const char *filename);
+bool storageReady();
 
 }  // namespace hardware

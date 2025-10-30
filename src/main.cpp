@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <lvgl.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "app/app_controller.h"
 #include "config.h"
@@ -7,6 +10,7 @@
 #include "ui/ui_logger.h"
 #include "ui/ui_pbox.h"
 #include "ui/ui_settings.h"
+#include "ui/ui_lvgl_util.h"
 
 namespace {
 app::ApplicationController controller;
@@ -64,6 +68,9 @@ void renderActiveScreen() {
   ui::UIScreen *desired = screenForMode(controller.state().activeMode);
   if (desired != activeScreen) {
     ensureScreenInitialized(desired);
+    if (desired && desired->root()) {
+      lv_disp_load_scr(desired->root());
+    }
     activeScreen = desired;
   }
   if (activeScreen) {
@@ -75,8 +82,21 @@ void renderActiveScreen() {
 
 void setup() {
   hardware::initPeripherals();
+  ui::ensureLvglInitialized();
+  static TaskHandle_t lvglTaskHandle = nullptr;
+  xTaskCreatePinnedToCore(
+      [](void *) {
+        while (true) {
+          lv_timer_handler();
+          vTaskDelay(pdMS_TO_TICKS(5));
+        }
+      },
+      "lvgl", 4096, nullptr, 1, &lvglTaskHandle, 1);
   ensureScreenInitialized(screenForMode(controller.state().activeMode));
   activeScreen = screenForMode(controller.state().activeMode);
+  if (activeScreen && activeScreen->root()) {
+    lv_disp_load_scr(activeScreen->root());
+  }
 }
 
 void loop() {
@@ -85,5 +105,5 @@ void loop() {
   updateSensors();
   renderActiveScreen();
   hardware::flushDiagnostics(controller.state(), now);
-  delay(50);
+  delay(10);
 }

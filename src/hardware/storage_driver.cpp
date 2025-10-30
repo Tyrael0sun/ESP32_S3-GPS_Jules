@@ -42,4 +42,8 @@ File openGpxLog(const char *filename) {
   return SD_MMC.open(path, FILE_APPEND);
 }
 
+bool storageReady() {
+  return g_storageReady;
+}
+
 }  // namespace hardware

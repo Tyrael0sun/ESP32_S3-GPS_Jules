@@ -69,11 +69,6 @@ void initDisplay() {
   g_display.init();
   g_display.setRotation(2);
   g_display.setSwapBytes(true);
-  g_display.fillScreen(0x0000);
-  g_display.setTextColor(0xFFFF, 0x0000);
-  g_display.setTextDatum(lgfx::middle_center);
-  g_display.setTextSize(2);
-  g_display.drawString(F("Booting..."), g_display.width() / 2, g_display.height() / 2);
   setBacklight(0.5f);
 }
 
