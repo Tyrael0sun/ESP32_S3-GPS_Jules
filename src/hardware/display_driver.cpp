@@ -67,7 +67,7 @@ lgfx::LGFX_Device &display() {
 
 void initDisplay() {
   g_display.init();
-  g_display.setRotation(2);
+  g_display.setRotation(0);  // offset_rotation (2) + 0 => 180° panel orientation
   g_display.setSwapBytes(true);
   setBacklight(0.5f);
 }

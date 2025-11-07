@@ -33,11 +33,11 @@ float readMcuTemperatureC() {
 namespace hardware {
 
 void initPeripherals() {
+  initDisplay();
   serial_router::init();
   auto &dbg = serial_router::debug();
   dbg.println(F("[BOOT] Initializing peripherals"));
 
-  initDisplay();
   dbg.println(F("[BOOT] Display ready"));
 
   I2CBus.begin(pins::kI2cSda, pins::kI2cScl, 400000);

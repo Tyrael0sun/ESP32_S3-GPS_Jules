@@ -15,7 +15,7 @@ void StatusBar::init(lv_obj_t *parent) {
   container_ = lv_obj_create(parent);
   lv_obj_clear_flag(container_, LV_OBJ_FLAG_SCROLLABLE);
   const lv_coord_t width = lv_disp_get_hor_res(nullptr);
-  lv_obj_set_size(container_, width, 32);
+  lv_obj_set_size(container_, width, StatusBar::kHeight);
   lv_obj_set_pos(container_, 0, 0);
   lv_obj_align(container_, LV_ALIGN_TOP_MID, 0, 0);
   lv_obj_set_style_bg_color(container_, lv_color_hex(0x202020), 0);

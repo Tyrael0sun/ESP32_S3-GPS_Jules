@@ -8,6 +8,7 @@
 #include "hardware/hardware_stubs.h"
 #include "ui/ui_bike_computer.h"
 #include "ui/ui_logger.h"
+#include "ui/ui_gnss_debug.h"
 #include "ui/ui_pbox.h"
 #include "ui/ui_settings.h"
 #include "ui/ui_lvgl_util.h"
@@ -17,6 +18,7 @@ app::ApplicationController controller;
 ui::BikeComputerScreen bikeScreen;
 ui::PboxScreen pboxScreen;
 ui::LoggerScreen loggerScreen;
+ui::GnssDebugScreen gnssDebugScreen;
 ui::SettingsScreen settingsScreen;
 ui::UIScreen *activeScreen = nullptr;
 
@@ -28,6 +30,8 @@ ui::UIScreen *screenForMode(app::Mode mode) {
       return &pboxScreen;
     case app::Mode::Logger:
       return &loggerScreen;
+    case app::Mode::GnssDebug:
+      return &gnssDebugScreen;
     case app::Mode::Settings:
       return &settingsScreen;
   }
@@ -38,6 +42,7 @@ void ensureScreenInitialized(ui::UIScreen *screen) {
   static bool initializedBike = false;
   static bool initializedPbox = false;
   static bool initializedLogger = false;
+  static bool initializedGnss = false;
   static bool initializedSettings = false;
 
   if (screen == &bikeScreen && !initializedBike) {
@@ -49,6 +54,9 @@ void ensureScreenInitialized(ui::UIScreen *screen) {
   } else if (screen == &loggerScreen && !initializedLogger) {
     screen->init();
     initializedLogger = true;
+  } else if (screen == &gnssDebugScreen && !initializedGnss) {
+    screen->init();
+    initializedGnss = true;
   } else if (screen == &settingsScreen && !initializedSettings) {
     screen->init();
     initializedSettings = true;
@@ -63,7 +71,7 @@ void updateSensors() {
   hardware::pollBattery(controller.state().battery);
 }
 
-void renderActiveScreen() {
+void renderActiveScreenLocked() {
   ui::RenderContext ctx{controller.state()};
   ui::UIScreen *desired = screenForMode(controller.state().activeMode);
   if (desired != activeScreen) {
@@ -78,6 +86,17 @@ void renderActiveScreen() {
   }
 }
 
+void lvglTaskEntry(void *) {
+  while (true) {
+    ui::LvglGuard guard(pdMS_TO_TICKS(50));
+    if (guard.locked()) {
+      renderActiveScreenLocked();
+      lv_timer_handler();
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -85,25 +104,14 @@ void setup() {
   ui::ensureLvglInitialized();
   static TaskHandle_t lvglTaskHandle = nullptr;
   xTaskCreatePinnedToCore(
-      [](void *) {
-        while (true) {
-          lv_timer_handler();
-          vTaskDelay(pdMS_TO_TICKS(5));
-        }
-      },
+      lvglTaskEntry,
       "lvgl", 4096, nullptr, 1, &lvglTaskHandle, 1);
-  ensureScreenInitialized(screenForMode(controller.state().activeMode));
-  activeScreen = screenForMode(controller.state().activeMode);
-  if (activeScreen && activeScreen->root()) {
-    lv_disp_load_scr(activeScreen->root());
-  }
 }
 
 void loop() {
   const unsigned long now = millis();
   hardware::pollInput(controller);
   updateSensors();
-  renderActiveScreen();
   hardware::flushDiagnostics(controller.state(), now);
   delay(10);
 }

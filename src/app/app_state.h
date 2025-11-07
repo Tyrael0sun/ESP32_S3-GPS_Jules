@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <array>
 
 namespace app {
 
@@ -8,15 +9,47 @@ enum class Mode {
   BikeComputer,
   PBox,
   Logger,
+  GnssDebug,
   Settings
 };
 
+enum class GnssConstellation : uint8_t {
+  Unknown,
+  GPS,
+  GLONASS,
+  Galileo,
+  BeiDou,
+  QZSS,
+  SBAS,
+  Mixed
+};
+
+struct GnssSatellite {
+  GnssConstellation constellation = GnssConstellation::Unknown;
+  uint8_t nmeaId = 0;
+  uint8_t cn0 = 0;
+  bool usedForFix = false;
+  bool tracked = false;
+};
+
 struct GnssSnapshot {
+  static constexpr size_t kLogLines = 14;
+  static constexpr size_t kLogLineLength = 96;
+  static constexpr size_t kMaxSatellites = 32;
+
   bool fix = false;
   uint8_t satellites = 0;
   double latitude = 0.0;
   double longitude = 0.0;
+  double altitudeM = 0.0;
+  bool altitudeValid = false;
   float speedKmh = 0.0f;
+  size_t satelliteCount = 0;
+  std::array<GnssSatellite, kMaxSatellites> satelliteList{};
+  bool scrollMode = false;
+  int16_t scrollRow = 0;
+  size_t logCount = 0;
+  char logs[kLogLines][kLogLineLength] = {};
 };
 
 struct ImuSnapshot {

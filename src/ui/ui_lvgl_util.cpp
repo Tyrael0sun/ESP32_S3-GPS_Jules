@@ -2,6 +2,9 @@
 
 #include <Arduino.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 #ifdef ARDUINO_ARCH_ESP32
 #include <esp_heap_caps.h>
 #endif
@@ -16,6 +19,7 @@ lv_disp_t *display = nullptr;
 lv_indev_t *encoder = nullptr;
 lv_disp_draw_buf_t drawBuf;
 lv_color_t *drawBuffer = nullptr;
+SemaphoreHandle_t lvglMutex = nullptr;
 }  // namespace
 
 static void flushCallback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
@@ -30,6 +34,9 @@ static void flushCallback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 }
 
 void ensureLvglInitialized() {
+  if (!lvglMutex) {
+    lvglMutex = xSemaphoreCreateRecursiveMutex();
+  }
   if (lvglReady) {
     return;
   }
@@ -55,7 +62,7 @@ void ensureLvglInitialized() {
   dispDrv.flush_cb = flushCallback;
   dispDrv.draw_buf = &drawBuf;
   display = lv_disp_drv_register(&dispDrv);
-  lv_disp_set_rotation(display, LV_DISP_ROT_180);
+  lv_disp_set_rotation(display, LV_DISP_ROT_NONE);
   lv_disp_set_default(display);
 
   static lv_indev_drv_t indevDrv;
@@ -68,6 +75,30 @@ void ensureLvglInitialized() {
   encoder = lv_indev_drv_register(&indevDrv);
 
   lvglReady = true;
+}
+
+bool lockLvgl(TickType_t timeout) {
+  if (!lvglMutex) {
+    return false;
+  }
+  return xSemaphoreTakeRecursive(lvglMutex, timeout) == pdTRUE;
+}
+
+void unlockLvgl() {
+  if (!lvglMutex) {
+    return;
+  }
+  xSemaphoreGiveRecursive(lvglMutex);
+}
+
+LvglGuard::LvglGuard(TickType_t timeout) {
+  locked_ = lockLvgl(timeout);
+}
+
+LvglGuard::~LvglGuard() {
+  if (locked_) {
+    unlockLvgl();
+  }
 }
 
 }  // namespace ui

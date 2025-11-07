@@ -188,3 +188,9 @@ BARO: 1013.2hPa
 TEMP: MCU=37.5°C, IMU=35.8°C, BARO=34.9°C, MAG=35°C
 RESULT: OK
 ```
+
+编译命令
+cd /workspaces/ESP32_S3-GPS_Jules && pio run
+
+固件整合命令
+cd /workspaces/ESP32_S3-GPS_Jules && python ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bin -o release/esp32_s3_gps_v0_0_3.bin 0x0 .pio/build/esp32-s3-devkitc-1/bootloader.bin 0x8000 .pio/build/esp32-s3-devkitc-1/partitions.bin 0x10000 .pio/build/esp32-s3-devkitc-1/firmware.bin

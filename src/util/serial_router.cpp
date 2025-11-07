@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "config.h"
+
 namespace {
 HardwareSerial debugSerial(0);
 }  // namespace
@@ -11,7 +13,7 @@ namespace serial_router {
 void init() {
   Serial.begin(115200);
   const unsigned long start = millis();
-  while (!Serial && millis() - start < 2000) {
+  while (!Serial && millis() - start < config::kUsbSerialInitTimeoutMs) {
     delay(10);
   }
 

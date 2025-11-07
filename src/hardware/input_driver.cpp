@@ -82,21 +82,36 @@ void InputDriver::processEncoder(app::ApplicationController &controller, uint32_
 
   const int32_t stepTicks = config::kEncoderTicksPerStep > 0 ? config::kEncoderTicksPerStep : 1;
   auto &dbg = serial_router::debug();
+  const bool gnssScrollActive = controller.state().activeMode == app::Mode::GnssDebug && controller.state().gnss.scrollMode;
 
-  while (encoderAccumulator_ >= stepTicks) {
-    encoderAccumulator_ -= stepTicks;
-    controller.cycleModeForward();
-    dbg.printf("[INPUT] %lu ms: encoder CW (ticks=%ld)\r\n",
-               static_cast<unsigned long>(nowMs),
-               static_cast<long>(delta));
-  }
-
-  while (encoderAccumulator_ <= -stepTicks) {
-    encoderAccumulator_ += stepTicks;
-    controller.cycleModeBackward();
-    dbg.printf("[INPUT] %lu ms: encoder CCW (ticks=%ld)\r\n",
-               static_cast<unsigned long>(nowMs),
-               static_cast<long>(delta));
+  if (encoderAccumulator_ >= stepTicks) {
+    encoderAccumulator_ = 0;
+    if (gnssScrollActive) {
+      controller.adjustGnssScroll(1);
+      dbg.printf("[INPUT] %lu ms: gnss scroll down (ticks=%ld, row=%d)\r\n",
+                 static_cast<unsigned long>(nowMs),
+                 static_cast<long>(delta),
+                 static_cast<int>(controller.state().gnss.scrollRow));
+    } else {
+      controller.cycleModeForward();
+      dbg.printf("[INPUT] %lu ms: encoder CW (ticks=%ld)\r\n",
+                 static_cast<unsigned long>(nowMs),
+                 static_cast<long>(delta));
+    }
+  } else if (encoderAccumulator_ <= -stepTicks) {
+    encoderAccumulator_ = 0;
+    if (gnssScrollActive) {
+      controller.adjustGnssScroll(-1);
+      dbg.printf("[INPUT] %lu ms: gnss scroll up (ticks=%ld, row=%d)\r\n",
+                 static_cast<unsigned long>(nowMs),
+                 static_cast<long>(delta),
+                 static_cast<int>(controller.state().gnss.scrollRow));
+    } else {
+      controller.cycleModeBackward();
+      dbg.printf("[INPUT] %lu ms: encoder CCW (ticks=%ld)\r\n",
+                 static_cast<unsigned long>(nowMs),
+                 static_cast<long>(delta));
+    }
   }
 }
 
@@ -181,7 +196,13 @@ void InputDriver::dispatchButtonEvent(app::ApplicationController &controller, Bu
       dbg.printf("[INPUT] %lu ms: button medium (%lu ms)\r\n",
                  static_cast<unsigned long>(millis()),
                  static_cast<unsigned long>(primaryDurationMs));
-      controller.startOrStopRecording();
+      if (controller.state().activeMode == app::Mode::GnssDebug) {
+        controller.toggleGnssScrollMode();
+        dbg.printf("[INPUT] GNSS scroll mode %s\r\n",
+                   controller.state().gnss.scrollMode ? "ON" : "OFF");
+      } else {
+        controller.startOrStopRecording();
+      }
       break;
     case ButtonEvent::LongPress:
       dbg.printf("[INPUT] %lu ms: button long (%lu ms)\r\n",

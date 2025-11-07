@@ -8,6 +8,8 @@ namespace ui {
 
 class StatusBar {
  public:
+  static constexpr lv_coord_t kHeight = 32;
+
   void init(lv_obj_t *parent);
   void update(const app::SystemState &state);
   lv_obj_t *container() const { return container_; }

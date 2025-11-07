@@ -12,6 +12,8 @@ class ApplicationController {
   void cycleModeBackward();
   void startOrStopRecording();
   void enterSettings();
+  void toggleGnssScrollMode();
+  void adjustGnssScroll(int16_t steps);
 
   SystemState &state() { return state_; }
   const SystemState &state() const { return state_; }

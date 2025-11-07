@@ -53,7 +53,7 @@ void Lsm6dsrDriver::read(app::ImuSnapshot &snapshot) {
   const int16_t accelY = static_cast<int16_t>(buffer[11] << 8 | buffer[10]);
   const int16_t accelZ = static_cast<int16_t>(buffer[13] << 8 | buffer[12]);
 
-  snapshot.temperatureC = 25.0f + (tempRaw / 16.0f);
+  snapshot.temperatureC = 25.0f + (static_cast<float>(tempRaw) / 256.0f);
   snapshot.accelX = (accelX * kAccelScale) / 1000.0f;
   snapshot.accelY = (accelY * kAccelScale) / 1000.0f;
   snapshot.accelZ = (accelZ * kAccelScale) / 1000.0f;

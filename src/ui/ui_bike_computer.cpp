@@ -22,8 +22,7 @@ void BikeComputerScreen::init() {
   lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
   statusBar_.init(root_);
-  const lv_obj_t *statusContainer = statusBar_.container();
-  const lv_coord_t statusHeight = statusContainer ? lv_obj_get_height(statusContainer) : 0;
+  const lv_coord_t statusHeight = StatusBar::kHeight;
   const lv_coord_t contentHeight = height > statusHeight ? height - statusHeight : height;
 
   content_ = lv_obj_create(root_);
