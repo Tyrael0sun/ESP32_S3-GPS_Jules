@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "pin_config.h"
+#include "util/serial_router.h"
 
 namespace {
 hardware::GnssDriver g_gnss;
@@ -43,12 +44,107 @@ app::GnssConstellation constellationFromTalker(const char *systemId) {
 
 namespace hardware {
 
+void GnssDriver::startSerial(uint32_t baud) {
+  if (currentBaud_ != 0) {
+    serial_.end();
+  }
+  if (config::kGnssSerialRxBufferSize > 0) {
+    (void)serial_.setRxBufferSize(config::kGnssSerialRxBufferSize);
+  }
+  serial_.begin(baud, SERIAL_8N1, pins::kGnssRx, pins::kGnssTx);
+  currentBaud_ = baud;
+  lastSerialActivityMs_ = millis();
+  lastParserCharCount_ = parser_.charsProcessed();
+  while (serial_.available()) {
+    serial_.read();
+  }
+}
+
+bool GnssDriver::drainSerial(uint32_t durationMs, bool detectSentence) {
+  const uint32_t start = millis();
+  bool sentenceSeen = false;
+  while (millis() - start < durationMs) {
+    bool readAny = false;
+    while (serial_.available()) {
+      readAny = true;
+      const char c = static_cast<char>(serial_.read());
+      if (detectSentence && c == '$') {
+        sentenceSeen = true;
+      }
+      appendLogChar(c);
+      parser_.encode(c);
+    }
+    if (readAny) {
+      lastSerialActivityMs_ = millis();
+      lastParserCharCount_ = parser_.charsProcessed();
+    } else {
+      delay(1);
+    }
+  }
+
+  return detectSentence ? sentenceSeen : true;
+}
+
+void GnssDriver::recoverSerial() {
+  const uint32_t desiredBaud = (config::kGnssTargetBaud != config::kGnssStartupBaud)
+                                   ? config::kGnssTargetBaud
+                                   : config::kGnssStartupBaud;
+
+  auto attemptBaud = [&](uint32_t baud) -> bool {
+    const uint32_t before = parser_.charsProcessed();
+    startSerial(baud);
+    delay(config::kGnssSerialRecoveryDelayMs);
+    const bool sawSentence = drainSerial(config::kGnssSerialRecoveryDrainMs, true);
+    return sawSentence || parser_.charsProcessed() > before;
+  };
+
+  uint32_t selectedBaud = currentBaud_ ? currentBaud_ : config::kGnssStartupBaud;
+  bool recovered = attemptBaud(selectedBaud);
+
+  if (!recovered && desiredBaud != selectedBaud) {
+    if (attemptBaud(desiredBaud)) {
+      recovered = true;
+      selectedBaud = desiredBaud;
+    }
+  }
+
+  if (!recovered && config::kGnssStartupBaud != selectedBaud) {
+    if (attemptBaud(config::kGnssStartupBaud)) {
+      recovered = true;
+      selectedBaud = config::kGnssStartupBaud;
+    }
+  }
+
+  if (!recovered) {
+    if (currentBaud_ != config::kGnssStartupBaud) {
+      startSerial(config::kGnssStartupBaud);
+    }
+    lastSerialActivityMs_ = millis();
+    lastParserCharCount_ = parser_.charsProcessed();
+    return;
+  }
+
+  if (selectedBaud == config::kGnssStartupBaud && desiredBaud != config::kGnssStartupBaud) {
+    configureSerialPort(desiredBaud);
+    if (!attemptBaud(desiredBaud)) {
+      startSerial(config::kGnssStartupBaud);
+      delay(config::kGnssSerialRecoveryDelayMs);
+      drainSerial(config::kGnssSerialRecoveryDrainMs);
+    } else {
+      selectedBaud = desiredBaud;
+    }
+  }
+
+  lastSerialActivityMs_ = millis();
+  lastParserCharCount_ = parser_.charsProcessed();
+}
+
 void GnssDriver::begin() {
   pinMode(pins::kGnssLdoEn, OUTPUT);
   digitalWrite(pins::kGnssLdoEn, HIGH);
   delay(50);
 
-  serial_.begin(config::kGnssStartupBaud, SERIAL_8N1, pins::kGnssRx, pins::kGnssTx);
+  startSerial(config::kGnssStartupBaud);
   delay(200);
 
   parser_ = TinyGPSPlus();
@@ -63,50 +159,70 @@ void GnssDriver::begin() {
   satellites_.fill({});
   satelliteCount_ = 0;
 
-  // Apply configuration while the receiver is still at its default baud rate.
+  drainSerial(config::kGnssSerialRecoveryDrainMs);
+
+  // Apply only the baud rate and update interval adjustments; leave other settings at module defaults.
   setUpdateRateHz(config::kDefaultGnssRateHz);
-  configureNmeaOutput();
-  configureDynamicModel();
 
   if (config::kGnssTargetBaud != config::kGnssStartupBaud) {
-    const bool switched = configureSerialPort(config::kGnssTargetBaud);
+    configureSerialPort(config::kGnssTargetBaud);
     serial_.flush();
     delay(100);
-    if (switched) {
-      serial_.end();
-      delay(10);
-      serial_.begin(config::kGnssTargetBaud, SERIAL_8N1, pins::kGnssRx, pins::kGnssTx);
+    startSerial(config::kGnssTargetBaud);
+    delay(config::kGnssSerialRecoveryDelayMs);
+    const bool sawSentence = drainSerial(config::kGnssSerialRecoveryDrainMs, true);
+    if (!sawSentence) {
+      startSerial(config::kGnssStartupBaud);
+      delay(config::kGnssSerialRecoveryDelayMs);
+      drainSerial(config::kGnssSerialRecoveryDrainMs);
     }
   }
 }
 
 void GnssDriver::poll(app::GnssSnapshot &snapshot) {
+  const uint32_t now = millis();
+  bool readAny = false;
+
   while (serial_.available()) {
+    readAny = true;
     const char c = static_cast<char>(serial_.read());
     appendLogChar(c);
     parser_.encode(c);
   }
 
-  if (parser_.location.isUpdated()) {
+  if (readAny) {
+    lastSerialActivityMs_ = now;
+    lastParserCharCount_ = parser_.charsProcessed();
+  } else if (now - lastSerialActivityMs_ > config::kGnssSerialWatchdogMs &&
+             parser_.charsProcessed() == lastParserCharCount_) {
+    recoverSerial();
+    return;
+  }
+
+  const bool locationValid = parser_.location.isValid();
+  if (locationValid) {
     snapshot.latitude = parser_.location.lat();
     snapshot.longitude = parser_.location.lng();
   }
-  if (parser_.satellites.isUpdated()) {
+
+  if (parser_.satellites.isValid()) {
     snapshot.satellites = static_cast<uint8_t>(parser_.satellites.value());
   }
-  if (parser_.time.isUpdated()) {
-    snapshot.fix = parser_.location.isValid() && parser_.hdop.isValid();
-  }
-  if (parser_.speed.isUpdated()) {
+
+  if (parser_.speed.isValid()) {
     snapshot.speedKmh = parser_.speed.kmph();
   }
-  if (parser_.altitude.isUpdated()) {
+
+  if (parser_.altitude.isValid()) {
     snapshot.altitudeM = parser_.altitude.meters();
-    snapshot.altitudeValid = parser_.altitude.isValid();
   }
 
+  snapshot.altitudeValid = parser_.altitude.isValid();
+  snapshot.fix = locationValid;
   copyLogsToSnapshot(snapshot);
   copySatellitesToSnapshot(snapshot);
+
+  (void)now;
 }
 
 void GnssDriver::setUpdateRateHz(uint8_t hz) {
@@ -195,59 +311,6 @@ bool GnssDriver::sendUbloxCommand(uint8_t cls, uint8_t id, const uint8_t *payloa
   return false;
 }
 
-void GnssDriver::configureDynamicModel() {
-  uint8_t payload[36] = {};
-  payload[0] = 0x03;  // apply dynamic model and fix mode
-  payload[2] = 0x06;  // automotive dynamic model for bike computer use
-  payload[3] = 0x03;  // auto 2D/3D fix mode
-  sendUbloxCommand(0x06, 0x24, payload, sizeof(payload));
-}
-
-void GnssDriver::configureNmeaOutput() {
-  // Force GPS-only constellation tracking (disable all other systems).
-  {
-    const uint8_t payload[] = {
-        0x00, 0x20, 0x20, 0x07,
-        0x00, 0x08, 0x10, 0x00, 0x01, 0x00, 0x01, 0x01,  // GPS enabled
-        0x01, 0x03, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,  // SBAS disabled
-        0x02, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,  // Galileo disabled
-        0x03, 0x08, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,  // BeiDou disabled
-        0x04, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,  // IMES disabled
-        0x05, 0x03, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,  // QZSS disabled
-        0x06, 0x0A, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00   // GLONASS disabled
-    };
-    sendUbloxCommand(0x06, 0x3E, payload, sizeof(payload));
-  }
-
-  auto configureMessage = [&](uint8_t msgClass, uint8_t msgId, uint8_t rate) {
-    const uint8_t payload[8] = {
-        msgClass,
-        msgId,
-        0x00,  // I2C
-        rate,  // UART1 (active port)
-        0x00,  // UART2
-        0x00,  // USB
-        0x00,  // SPI
-        0x00}; // Reserved
-    sendUbloxCommand(0x06, 0x01, payload, sizeof(payload));
-  };
-
-  constexpr uint8_t kDisableStdIds[] = {0x01, 0x05, 0x06, 0x0A, 0x0D, 0x0F, 0x41};
-  for (uint8_t msgId : kDisableStdIds) {
-    configureMessage(0xF0, msgId, 0);
-  }
-
-  configureMessage(0xF0, 0x00, 1);  // GGA for position
-  configureMessage(0xF0, 0x04, 1);  // RMC for time/speed
-  configureMessage(0xF0, 0x02, 1);  // GSA for satellites used
-  configureMessage(0xF0, 0x03, 1);  // GSV for satellites in view
-
-  // Disable non-GPS talker sentences entirely.
-  constexpr uint8_t kDisableOtherTalkers[] = {0x00, 0x01, 0x02, 0x03};
-  for (uint8_t msgId : kDisableOtherTalkers) {
-    configureMessage(0xF1, msgId, 0);
-  }
-}
 
 void GnssDriver::appendLogChar(char c) {
   const uint8_t uc = static_cast<uint8_t>(c);

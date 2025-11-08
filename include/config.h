@@ -1,13 +1,18 @@
 #pragma once
 
 #include <stdint.h>
+#include <cstddef>
 
 namespace config {
 // GNSS configuration defaults
-constexpr uint8_t kDefaultGnssRateHz = 10;
+constexpr uint8_t kDefaultGnssRateHz = 5;
 constexpr uint8_t kGnssRateOptions[] = {1, 5, 10, 25};
 constexpr uint32_t kGnssStartupBaud = 9600;
 constexpr uint32_t kGnssTargetBaud = 115200;
+constexpr size_t kGnssSerialRxBufferSize = 1536; // enlarge GNSS UART RX buffer
+constexpr uint32_t kGnssSerialWatchdogMs = 1500; // restart GNSS UART after this idle window (ms)
+constexpr uint32_t kGnssSerialRecoveryDelayMs = 60; // settle time before reading after restart (ms)
+constexpr uint32_t kGnssSerialRecoveryDrainMs = 120; // drain window to re-sync NMEA stream (ms)
 
 // Input timing thresholds in milliseconds
 constexpr uint16_t kButtonDebounceMs = 100;

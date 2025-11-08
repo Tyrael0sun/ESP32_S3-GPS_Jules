@@ -16,9 +16,10 @@ class GnssDriver {
   void setUpdateRateHz(uint8_t hz);
 
  private:
+  void startSerial(uint32_t baud);
+  bool drainSerial(uint32_t durationMs, bool detectSentence = false);
+  void recoverSerial();
   bool configureSerialPort(uint32_t baud);
-  void configureDynamicModel();
-  void configureNmeaOutput();
   bool sendUbloxCommand(uint8_t cls, uint8_t id, const uint8_t *payload, size_t len);
   bool waitForAck(uint8_t cls, uint8_t id);
   void appendLogChar(char c);
@@ -35,12 +36,15 @@ class GnssDriver {
 
   TinyGPSPlus parser_;
   HardwareSerial serial_{1};
+  uint32_t currentBaud_ = 0;
   uint8_t currentRateHz_ = 0;
   std::array<std::array<char, app::GnssSnapshot::kLogLineLength>, app::GnssSnapshot::kLogLines> logLines_{};
   std::array<char, app::GnssSnapshot::kLogLineLength> currentLine_{};
   size_t logWriteIndex_ = 0;
   size_t logCount_ = 0;
   size_t currentLinePos_ = 0;
+  uint32_t lastSerialActivityMs_ = 0;
+  uint32_t lastParserCharCount_ = 0;
   struct SatelliteRecord {
     app::GnssConstellation constellation = app::GnssConstellation::Unknown;
     uint8_t nmeaId = 0;
